@@ -381,11 +381,11 @@ internal sealed class BatteryMonitor : Form
         var bitmap = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         float scale = size / 48F;
         using (var g = Graphics.FromImage(bitmap))
-        // Match the reference silhouette: 2:1 body, gray rim, white inset and dark center.
-        using (var body = RoundedRect(ScaleRect(0.5F, 12.8F, 41.5F, 21.5F, scale), 5.9F * scale))
-        using (var inset = RoundedRect(ScaleRect(2.7F, 15F, 37.1F, 17.1F, scale), 4.7F * scale))
-        using (var cavity = RoundedRect(ScaleRect(4.5F, 16.8F, 33.5F, 13.5F, scale), 3.4F * scale))
-        using (var cap = RoundedRect(ScaleRect(44F, 19.4F, 3.2F, 8.3F, scale), 1.6F * scale))
+        // Fill the square notification slot vertically so the percentage remains legible.
+        using (var body = RoundedRect(ScaleRect(0.5F, 8F, 42.5F, 32F, scale), 7F * scale))
+        using (var inset = RoundedRect(ScaleRect(2.5F, 10F, 38.5F, 28F, scale), 5.5F * scale))
+        using (var cavity = RoundedRect(ScaleRect(4.2F, 11.7F, 35.1F, 24.6F, scale), 4F * scale))
+        using (var cap = RoundedRect(ScaleRect(44F, 17F, 3.5F, 14F, scale), 1.75F * scale))
         using (var rimBrush = new SolidBrush(Color.FromArgb(153, 153, 153)))
         using (var insetBrush = new SolidBrush(Color.White))
         using (var cavityBrush = new SolidBrush(Color.FromArgb(34, 34, 34)))
@@ -404,8 +404,8 @@ internal sealed class BatteryMonitor : Form
             int level;
             bool known = Int32.TryParse(number, out level);
             Color textColor = !known ? Color.White : level <= 30 ? color : Color.White;
-            float fontPixels = (number.Length == 3 ? 12F : 15F) * scale;
-            float minimumPixels = number.Length == 3 ? 5F : 6F;
+            float fontPixels = (number.Length == 3 ? 18F : 22F) * scale;
+            float minimumPixels = number.Length == 3 ? 6.5F : 8F;
             using (var font = new Font(IconFontFamily(), Math.Max(minimumPixels, fontPixels),
                 FontStyle.Bold, GraphicsUnit.Pixel))
             using (var layout = (StringFormat)StringFormat.GenericTypographic.Clone())
@@ -415,7 +415,7 @@ internal sealed class BatteryMonitor : Form
                 layout.LineAlignment = StringAlignment.Center;
                 layout.FormatFlags |= StringFormatFlags.NoWrap | StringFormatFlags.NoClip;
                 g.DrawString(number, font, textBrush,
-                    ScaleRect(4.5F, 16.8F, 33.5F, 13.5F, scale), layout);
+                    ScaleRect(2F, 2F, 39F, 44F, scale), layout);
             }
         }
         return bitmap;
