@@ -1,0 +1,9 @@
+*.pdb
+*.mdb
+*.tmp
+*.log
+Thumbs.db
+Desktop.ini
+.vs/
+obj/
+bin/
