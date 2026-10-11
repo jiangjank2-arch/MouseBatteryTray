@@ -287,8 +287,8 @@ internal sealed class BatteryMonitor : Form
         }
         else if (active.Level >= 0)
         {
-            Color color = active.Level <= 15 ? Color.FromArgb(220, 69, 65) :
-                active.Level <= 30 ? Color.FromArgb(224, 160, 40) : Color.FromArgb(45, 170, 91);
+            Color color = active.Level <= 10 ? Color.FromArgb(255, 59, 48) :
+                active.Level <= 30 ? Color.FromArgb(255, 204, 0) : Color.FromArgb(52, 199, 89);
             Display(active.Level.ToString(), active.Name + "  " + active.Level + "%", color);
         }
         else Display("?", active.Name + "：已识别，Windows 未提供电量", Color.Gray);
@@ -338,14 +338,13 @@ internal sealed class BatteryMonitor : Form
     {
         using (var bitmap = new Bitmap(48, 48))
         using (var g = Graphics.FromImage(bitmap))
-        using (var body = RoundedRect(new RectangleF(2.5F, 8.5F, 39F, 31F), 7F))
-        using (var cap = RoundedRect(new RectangleF(41.5F, 18F, 4.5F, 12F), 2F))
-        using (var fill = new System.Drawing.Drawing2D.LinearGradientBrush(
-            new Rectangle(2, 8, 40, 32), color,
-            Color.FromArgb((int)(color.R * 0.72F), (int)(color.G * 0.72F),
-                (int)(color.B * 0.72F)), 90F))
-        using (var outline = new Pen(Color.FromArgb(218, 255, 255, 255), 1.4F))
-        using (var font = new Font("Segoe UI", number.Length == 3 ? 17F : 21F,
+        using (var body = RoundedRect(new RectangleF(2.5F, 10F, 39F, 28F), 7F))
+        using (var inner = RoundedRect(new RectangleF(5.5F, 13F, 33F, 22F), 4.5F))
+        using (var cap = RoundedRect(new RectangleF(42F, 18F, 4F, 12F), 2F))
+        using (var outline = new Pen(Color.FromArgb(235, 255, 255, 255), 2F))
+        using (var capBrush = new SolidBrush(Color.FromArgb(205, 255, 255, 255)))
+        using (var levelBrush = new SolidBrush(color))
+        using (var font = new Font(IconFontFamily(), number.Length == 3 ? 17F : 20F,
             FontStyle.Bold, GraphicsUnit.Pixel))
         using (var layout = new StringFormat())
         {
@@ -353,25 +352,46 @@ internal sealed class BatteryMonitor : Form
             g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
             g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
             g.Clear(Color.Transparent);
-            g.FillPath(fill, body);
-            using (var tip = new SolidBrush(color)) g.FillPath(tip, cap);
             g.DrawPath(outline, body);
-            layout.Alignment = StringAlignment.Center;
-            layout.LineAlignment = StringAlignment.Center;
-            g.DrawString(number, font, Brushes.White,
-                new RectangleF(4F, 9F, 36F, 27F), layout);
+            g.FillPath(capBrush, cap);
             int level;
             if (Int32.TryParse(number, out level))
             {
-                using (var track = new SolidBrush(Color.FromArgb(85, 255, 255, 255)))
-                    g.FillRectangle(track, 8F, 35F, 28F, 2F);
-                using (var progress = new SolidBrush(Color.White))
-                    g.FillRectangle(progress, 8F, 35F, 28F * level / 100F, 2F);
+                float fillWidth = 33F * Math.Max(0, Math.Min(100, level)) / 100F;
+                if (fillWidth > 0.4F)
+                {
+                    System.Drawing.Drawing2D.GraphicsState state = g.Save();
+                    g.SetClip(inner);
+                    g.FillRectangle(levelBrush, 5.5F, 13F, fillWidth, 22F);
+                    g.Restore(state);
+                }
             }
+            else
+            {
+                using (var unknown = new SolidBrush(Color.FromArgb(75, 255, 255, 255)))
+                    g.FillPath(unknown, inner);
+            }
+            layout.Alignment = StringAlignment.Center;
+            layout.LineAlignment = StringAlignment.Center;
+            g.DrawString(number, font, Brushes.White,
+                new RectangleF(4F, 10F, 36F, 27F), layout);
             IntPtr handle = bitmap.GetHicon();
             try { return (Icon)Icon.FromHandle(handle).Clone(); }
             finally { DestroyIcon(handle); }
         }
+    }
+
+    private static string IconFontFamily()
+    {
+        string[] preferred = { "SF Pro Display", "SF Pro Text", "Segoe UI Variable Display", "Segoe UI" };
+        using (var installed = new System.Drawing.Text.InstalledFontCollection())
+        {
+            foreach (string candidate in preferred)
+                foreach (FontFamily family in installed.Families)
+                    if (family.Name.Equals(candidate, StringComparison.OrdinalIgnoreCase))
+                        return family.Name;
+        }
+        return "Segoe UI";
     }
 
     private static System.Drawing.Drawing2D.GraphicsPath RoundedRect(RectangleF r, float radius)
