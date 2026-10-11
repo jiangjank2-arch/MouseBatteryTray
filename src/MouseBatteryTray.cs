@@ -3,6 +3,7 @@
 using System;
 using System.Collections.Generic;
 using System.Drawing;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Windows.Forms;
@@ -336,33 +337,75 @@ internal sealed class BatteryMonitor : Form
 
     private static Icon MakeIcon(string number, Color color)
     {
-        using (var bitmap = new Bitmap(48, 48))
+        int[] sizes = { 16, 20, 24, 32, 48 };
+        var images = new List<byte[]>();
+        foreach (int size in sizes)
+        {
+            using (var bitmap = RenderBatteryBitmap(size, number, color))
+            using (var png = new MemoryStream())
+            {
+                bitmap.Save(png, System.Drawing.Imaging.ImageFormat.Png);
+                images.Add(png.ToArray());
+            }
+        }
+
+        using (var ico = new MemoryStream())
+        using (var writer = new BinaryWriter(ico, Encoding.UTF8, true))
+        {
+            writer.Write((ushort)0);
+            writer.Write((ushort)1);
+            writer.Write((ushort)sizes.Length);
+            int offset = 6 + sizes.Length * 16;
+            for (int i = 0; i < sizes.Length; i++)
+            {
+                writer.Write((byte)sizes[i]);
+                writer.Write((byte)sizes[i]);
+                writer.Write((byte)0);
+                writer.Write((byte)0);
+                writer.Write((ushort)1);
+                writer.Write((ushort)32);
+                writer.Write((uint)images[i].Length);
+                writer.Write((uint)offset);
+                offset += images[i].Length;
+            }
+            foreach (byte[] image in images) writer.Write(image);
+            writer.Flush();
+            ico.Position = 0;
+            using (var loaded = new Icon(ico))
+                return (Icon)loaded.Clone();
+        }
+    }
+
+    private static Bitmap RenderBatteryBitmap(int size, string number, Color color)
+    {
+        var bitmap = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
+        float scale = size / 48F;
         using (var g = Graphics.FromImage(bitmap))
-        using (var body = RoundedRect(new RectangleF(2.5F, 10F, 39F, 28F), 7F))
-        using (var inner = RoundedRect(new RectangleF(5.5F, 13F, 33F, 22F), 4.5F))
-        using (var cap = RoundedRect(new RectangleF(42F, 18F, 4F, 12F), 2F))
-        using (var outline = new Pen(Color.FromArgb(235, 255, 255, 255), 2F))
-        using (var capBrush = new SolidBrush(Color.FromArgb(205, 255, 255, 255)))
+        using (var body = RoundedRect(ScaleRect(1F, 8F, 41F, 32F, scale), 7F * scale))
+        using (var inner = RoundedRect(ScaleRect(4F, 11F, 35F, 26F, scale), 5F * scale))
+        using (var cap = RoundedRect(ScaleRect(42F, 17F, 5F, 14F, scale), 2.5F * scale))
+        using (var outline = new Pen(Color.FromArgb(245, 255, 255, 255), Math.Max(1F, 2F * scale)))
+        using (var capBrush = new SolidBrush(Color.FromArgb(220, 255, 255, 255)))
         using (var levelBrush = new SolidBrush(color))
-        using (var font = new Font(IconFontFamily(), number.Length == 3 ? 17F : 20F,
-            FontStyle.Bold, GraphicsUnit.Pixel))
-        using (var layout = new StringFormat())
         {
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
-            g.TextRenderingHint = System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
+            g.TextRenderingHint = size <= 20
+                ? System.Drawing.Text.TextRenderingHint.SingleBitPerPixelGridFit
+                : System.Drawing.Text.TextRenderingHint.AntiAliasGridFit;
             g.Clear(Color.Transparent);
             g.DrawPath(outline, body);
             g.FillPath(capBrush, cap);
+
             int level;
             if (Int32.TryParse(number, out level))
             {
-                float fillWidth = 33F * Math.Max(0, Math.Min(100, level)) / 100F;
-                if (fillWidth > 0.4F)
+                float fillWidth = 35F * scale * Math.Max(0, Math.Min(100, level)) / 100F;
+                if (fillWidth > 0.35F)
                 {
                     System.Drawing.Drawing2D.GraphicsState state = g.Save();
                     g.SetClip(inner);
-                    g.FillRectangle(levelBrush, 5.5F, 13F, fillWidth, 22F);
+                    g.FillRectangle(levelBrush, 4F * scale, 11F * scale, fillWidth, 26F * scale);
                     g.Restore(state);
                 }
             }
@@ -371,14 +414,26 @@ internal sealed class BatteryMonitor : Form
                 using (var unknown = new SolidBrush(Color.FromArgb(75, 255, 255, 255)))
                     g.FillPath(unknown, inner);
             }
-            layout.Alignment = StringAlignment.Center;
-            layout.LineAlignment = StringAlignment.Center;
-            g.DrawString(number, font, Brushes.White,
-                new RectangleF(4F, 10F, 36F, 27F), layout);
-            IntPtr handle = bitmap.GetHicon();
-            try { return (Icon)Icon.FromHandle(handle).Clone(); }
-            finally { DestroyIcon(handle); }
+
+            float fontPixels = (number.Length == 3 ? 19F : 23F) * scale;
+            float minimumPixels = number.Length == 3 ? 7.2F : 8F;
+            using (var font = new Font(IconFontFamily(), Math.Max(minimumPixels, fontPixels),
+                FontStyle.Bold, GraphicsUnit.Pixel))
+            using (var layout = (StringFormat)StringFormat.GenericTypographic.Clone())
+            {
+                layout.Alignment = StringAlignment.Center;
+                layout.LineAlignment = StringAlignment.Center;
+                layout.FormatFlags |= StringFormatFlags.NoWrap | StringFormatFlags.NoClip;
+                g.DrawString(number, font, Brushes.White,
+                    ScaleRect(2F, 8F, 38F, 32F, scale), layout);
+            }
         }
+        return bitmap;
+    }
+
+    private static RectangleF ScaleRect(float x, float y, float width, float height, float scale)
+    {
+        return new RectangleF(x * scale, y * scale, width * scale, height * scale);
     }
 
     private static string IconFontFamily()
