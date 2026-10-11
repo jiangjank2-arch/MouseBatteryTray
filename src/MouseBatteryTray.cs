@@ -381,9 +381,9 @@ internal sealed class BatteryMonitor : Form
         var bitmap = new Bitmap(size, size, System.Drawing.Imaging.PixelFormat.Format32bppArgb);
         float scale = size / 48F;
         using (var g = Graphics.FromImage(bitmap))
-        using (var body = RoundedRect(ScaleRect(1F, 8F, 41F, 32F, scale), 7F * scale))
-        using (var inner = RoundedRect(ScaleRect(4F, 11F, 35F, 26F, scale), 5F * scale))
-        using (var cap = RoundedRect(ScaleRect(42F, 17F, 5F, 14F, scale), 2.5F * scale))
+        using (var body = RoundedRect(ScaleRect(0.5F, 5F, 43F, 38F, scale), 8F * scale))
+        using (var inner = RoundedRect(ScaleRect(3F, 7.5F, 38F, 33F, scale), 6F * scale))
+        using (var cap = RoundedRect(ScaleRect(44F, 16F, 4F, 16F, scale), 2F * scale))
         using (var outline = new Pen(Color.FromArgb(245, 255, 255, 255), Math.Max(1F, 2F * scale)))
         using (var capBrush = new SolidBrush(Color.FromArgb(220, 255, 255, 255)))
         using (var levelBrush = new SolidBrush(color))
@@ -400,12 +400,12 @@ internal sealed class BatteryMonitor : Form
             int level;
             if (Int32.TryParse(number, out level))
             {
-                float fillWidth = 35F * scale * Math.Max(0, Math.Min(100, level)) / 100F;
+                float fillWidth = 38F * scale * Math.Max(0, Math.Min(100, level)) / 100F;
                 if (fillWidth > 0.35F)
                 {
                     System.Drawing.Drawing2D.GraphicsState state = g.Save();
                     g.SetClip(inner);
-                    g.FillRectangle(levelBrush, 4F * scale, 11F * scale, fillWidth, 26F * scale);
+                    g.FillRectangle(levelBrush, 3F * scale, 7.5F * scale, fillWidth, 33F * scale);
                     g.Restore(state);
                 }
             }
@@ -415,8 +415,8 @@ internal sealed class BatteryMonitor : Form
                     g.FillPath(unknown, inner);
             }
 
-            float fontPixels = (number.Length == 3 ? 19F : 23F) * scale;
-            float minimumPixels = number.Length == 3 ? 7.2F : 8F;
+            float fontPixels = (number.Length == 3 ? 21F : 26F) * scale;
+            float minimumPixels = number.Length == 3 ? 7.5F : 8.5F;
             using (var font = new Font(IconFontFamily(), Math.Max(minimumPixels, fontPixels),
                 FontStyle.Bold, GraphicsUnit.Pixel))
             using (var layout = (StringFormat)StringFormat.GenericTypographic.Clone())
@@ -425,7 +425,7 @@ internal sealed class BatteryMonitor : Form
                 layout.LineAlignment = StringAlignment.Center;
                 layout.FormatFlags |= StringFormatFlags.NoWrap | StringFormatFlags.NoClip;
                 g.DrawString(number, font, Brushes.White,
-                    ScaleRect(2F, 8F, 38F, 32F, scale), layout);
+                    ScaleRect(1F, 5F, 41F, 38F, scale), layout);
             }
         }
         return bitmap;
