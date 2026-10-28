@@ -8,6 +8,6 @@ if not exist "%CSC%" (
   exit /b 1
 )
 if not exist "%ROOT%release" mkdir "%ROOT%release"
-"%CSC%" /nologo /utf8output /target:winexe /r:System.Windows.Forms.dll /r:System.Drawing.dll /out:"%ROOT%release\MouseBatteryTray.exe" "%ROOT%src\MouseBatteryTray.cs"
+"%CSC%" /nologo /utf8output /target:winexe /r:System.Windows.Forms.dll /r:System.Drawing.dll /out:"%ROOT%release\MouseBatteryTray.exe" "%ROOT%src\*.cs"
 if errorlevel 1 exit /b 1
 echo Build complete: "%ROOT%release\MouseBatteryTray.exe"

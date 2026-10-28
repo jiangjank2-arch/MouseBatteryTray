@@ -26,7 +26,10 @@ internal static class Program
 
 internal sealed class Device
 {
-    public string Id, Name, DeviceClass;
+    public string Id, Name, DeviceClass, Connection, BatterySource;
+    public bool Charging;
+    public bool BatteryCached;
+    public DateTime BatteryReadAt;
     public Guid Container;
     public int Level = -1;
 }
@@ -190,6 +193,8 @@ internal sealed class BatteryMonitor : Form
     private string activePath;
     private string pinnedId;
     private bool inputRegistered;
+    private bool refreshing, refreshAgain, closing;
+    private DateTime lastScan = DateTime.MinValue;
 
     // Keep a message-only purpose HWND; the only visible UI is the native taskbar tray icon.
     protected override void SetVisibleCore(bool value) { base.SetVisibleCore(false); }
@@ -206,6 +211,7 @@ internal sealed class BatteryMonitor : Form
         tray.ContextMenu = menu;
         tray.DoubleClick += delegate { RefreshNow(); };
         inputRegistered = RawMouse.Register(Handle);
+        Display("?", "正在读取鼠标电量…", Color.Gray);
         RefreshNow();
         tray.Visible = true;
         timer.Interval = 30000;
@@ -229,7 +235,12 @@ internal sealed class BatteryMonitor : Form
                 if (path != null && !String.Equals(path, activePath, StringComparison.OrdinalIgnoreCase))
                 {
                     activePath = path;
-                    RefreshNow();
+                    UpdateDisplay();
+                }
+                if (!refreshing && (DateTime.UtcNow - lastScan).TotalSeconds >= 3)
+                {
+                    Device active = ActiveDevice();
+                    if (active == null || active.Level < 0 || active.BatteryCached) RefreshNow();
                 }
             }
         }
@@ -244,8 +255,17 @@ internal sealed class BatteryMonitor : Form
     private Device ActiveDevice()
     {
         if (!String.IsNullOrEmpty(pinnedId))
-            return devices.Find(delegate(Device d) { return d.Id == pinnedId; });
-        if (String.IsNullOrEmpty(activePath)) return null;
+        {
+            Device pinned = devices.Find(delegate(Device d) { return d.Id == pinnedId; });
+            if (pinned != null) return pinned;
+        }
+        if (String.IsNullOrEmpty(activePath))
+        {
+            List<Device> known = devices.FindAll(delegate(Device d) {
+                return d.DeviceClass.Equals("Mouse", StringComparison.OrdinalIgnoreCase) && d.Level >= 0;
+            });
+            return known.Count == 1 ? known[0] : null;
+        }
         string id = activePath;
         if (id.StartsWith(@"\\?\", StringComparison.Ordinal)) id = id.Substring(4);
         int end = id.LastIndexOf('#');
@@ -278,9 +298,62 @@ internal sealed class BatteryMonitor : Form
 
     private void RefreshNow()
     {
-        try { devices = Pnp.Scan(); }
-        catch { Display("?", "无法读取鼠标设备信息", Color.Gray); return; }
-        BuildDeviceMenu();
+        if (closing) return;
+        if (refreshing) { refreshAgain = true; return; }
+        refreshing = true;
+        lastScan = DateTime.UtcNow;
+        System.Threading.ThreadPool.QueueUserWorkItem(delegate {
+            List<Device> scanned = null;
+            try
+            {
+                scanned = Pnp.Scan();
+                ReceiverBattery.Populate(scanned);
+            }
+            catch (Exception ex) { System.Diagnostics.Debug.WriteLine(ex); }
+            try
+            {
+                BeginInvoke((MethodInvoker)delegate {
+                    if (closing) return;
+                    refreshing = false;
+                    if (scanned != null)
+                    {
+                        foreach (Device device in scanned)
+                        {
+                            Device previous = devices.Find(delegate(Device d) { return d.Id == device.Id; });
+                            if (device.Level < 0 && device.BatterySource == "MCHOSE HID" &&
+                                previous != null && previous.Level >= 0 && previous.BatterySource == device.BatterySource)
+                            {
+                                device.Level = previous.Level;
+                                device.Connection = previous.Connection;
+                                device.Charging = previous.Charging;
+                                device.BatteryReadAt = previous.BatteryReadAt;
+                                device.BatteryCached = true;
+                            }
+                        }
+                        devices = scanned;
+                        BuildDeviceMenu();
+                        UpdateDisplay();
+                    }
+                    else if (devices.Count == 0) Display("?", "无法读取鼠标设备信息", Color.Gray);
+                    if (refreshAgain) { refreshAgain = false; RefreshNow(); }
+                });
+            }
+            catch (InvalidOperationException) { } // Window may close while HID I/O completes.
+        });
+    }
+
+    private static string Describe(Device device)
+    {
+        string detail = device.Name;
+        if (!String.IsNullOrEmpty(device.Connection)) detail += " · " + device.Connection;
+        if (device.Level >= 0) detail += " · " + device.Level + "%";
+        if (device.BatteryCached) detail += "（上次读取 " + device.BatteryReadAt.ToString("HH:mm") + "）";
+        else if (device.Charging) detail += " · 充电中";
+        return detail;
+    }
+
+    private void UpdateDisplay()
+    {
         Device active = ActiveDevice();
         if (active == null)
         {
@@ -288,11 +361,11 @@ internal sealed class BatteryMonitor : Form
         }
         else if (active.Level >= 0)
         {
-            Color color = active.Level <= 10 ? Color.FromArgb(255, 59, 48) :
-                active.Level <= 30 ? Color.FromArgb(255, 204, 0) : Color.FromArgb(52, 199, 89);
-            Display(active.Level.ToString(), active.Name + "  " + active.Level + "%", color);
+            Color color = Color.FromArgb(48, 209, 88);
+            Display(active.Level.ToString(), Describe(active), color);
         }
-        else Display("?", active.Name + "：已识别，Windows 未提供电量", Color.Gray);
+        else Display("?", active.Name + (active.BatterySource == "MCHOSE HID"
+            ? "：等待鼠标唤醒后读取电量" : "：已识别，设备未提供电量"), Color.Gray);
     }
 
     private void BuildDeviceMenu()
@@ -300,20 +373,22 @@ internal sealed class BatteryMonitor : Form
         MenuItem selection = menu.MenuItems[1];
         selection.MenuItems.Clear();
         selection.Enabled = true;
-        MenuItem automatic = new MenuItem("跟随当前使用的鼠标", delegate {
+        bool pinnedMissing = !String.IsNullOrEmpty(pinnedId) &&
+            !devices.Exists(delegate(Device d) { return d.Id == pinnedId; });
+        MenuItem automatic = new MenuItem(pinnedMissing
+            ? "跟随当前使用的鼠标（固定设备未连接）" : "跟随当前使用的鼠标", delegate {
             pinnedId = null;
             using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\MouseBatteryTray"))
                 key.DeleteValue("PinnedDeviceId", false);
             RefreshNow();
         });
-        automatic.Checked = String.IsNullOrEmpty(pinnedId);
+        automatic.Checked = String.IsNullOrEmpty(pinnedId) || pinnedMissing;
         selection.MenuItems.Add(automatic);
         foreach (Device device in devices)
         {
             if (device.Level < 0 && !device.DeviceClass.Equals("Mouse", StringComparison.OrdinalIgnoreCase)) continue;
             Device choice = device;
-            MenuItem item = new MenuItem(device.Name + "  " +
-                (device.Level >= 0 ? device.Level + "%" : "电量未知"), delegate {
+            MenuItem item = new MenuItem(device.Level >= 0 ? Describe(device) : device.Name + " · 电量未知", delegate {
                 pinnedId = choice.Id;
                 using (var key = Microsoft.Win32.Registry.CurrentUser.CreateSubKey(@"Software\MouseBatteryTray"))
                     key.SetValue("PinnedDeviceId", pinnedId);
@@ -386,9 +461,10 @@ internal sealed class BatteryMonitor : Form
         using (var inset = RoundedRect(ScaleRect(2.5F, 10F, 38.5F, 28F, scale), 5.5F * scale))
         using (var cavity = RoundedRect(ScaleRect(4.2F, 11.7F, 35.1F, 24.6F, scale), 4F * scale))
         using (var cap = RoundedRect(ScaleRect(44F, 17F, 3.5F, 14F, scale), 1.75F * scale))
-        using (var rimBrush = new SolidBrush(Color.FromArgb(153, 153, 153)))
-        using (var insetBrush = new SolidBrush(Color.White))
-        using (var cavityBrush = new SolidBrush(Color.FromArgb(34, 34, 34)))
+        using (var rimBrush = new SolidBrush(Color.FromArgb(146, 158, 151)))
+        using (var insetBrush = new SolidBrush(Color.FromArgb(238, 248, 241)))
+        using (var cavityBrush = new SolidBrush(number == "?"
+            ? Color.FromArgb(83, 96, 89) : color))
         {
             g.SmoothingMode = System.Drawing.Drawing2D.SmoothingMode.AntiAlias;
             g.PixelOffsetMode = System.Drawing.Drawing2D.PixelOffsetMode.HighQuality;
@@ -403,7 +479,7 @@ internal sealed class BatteryMonitor : Form
 
             int level;
             bool known = Int32.TryParse(number, out level);
-            Color textColor = !known ? Color.White : level <= 30 ? color : Color.White;
+            Color textColor = known ? Color.FromArgb(9, 44, 22) : Color.White;
             float fontPixels = (number.Length == 3 ? 18F : 22F) * scale;
             float minimumPixels = number.Length == 3 ? 6.5F : 8F;
             using (var font = new Font(IconFontFamily(), Math.Max(minimumPixels, fontPixels),
@@ -456,6 +532,7 @@ internal sealed class BatteryMonitor : Form
 
     protected override void OnFormClosed(FormClosedEventArgs e)
     {
+        closing = true;
         timer.Stop();
         tray.Visible = false;
         tray.Dispose();
